@@ -1,0 +1,26 @@
+table ip routing {
+        chain output {
+                 type route hook output priority 0;
+                 cgroup 100 meta mark set 0x00000064
+        }
+
+        chain postrouting {
+                 type filter hook postrouting priority 0;
+                 ct mark set mark
+        }
+
+        chain prerouting {
+                 type filter hook prerouting priority 0;
+                 meta mark set ct mark
+        }
+}
+table ip nat {
+        chain postrouting {
+                 type nat hook postrouting priority 0;
+                 mark 0x00000064 oifname != "lo" masquerade
+        }
+
+        chain prerouting {
+                 type nat hook prerouting priority 0;
+        }
+}

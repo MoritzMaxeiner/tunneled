@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# User 'dummy' with primary group 'dummy'
+UID=dummy
+GID=dummy
+
+# Routes
+#/bin/echo "100     openvpn.example.com" >> /etc/iproute2/rt_tables
+
+/sbin/ip rule add fwmark 100 table openvpn.example priority 100
+/sbin/ip rule add fwmark 100 table main unreachable priority 200
+
+# Control groups
+/usr/bin/cgcreate -t ${UID}:${GID} -a ${UID}:{$GID] -g net_cls:openvpn.example.com
+/bin/echo "100" > /sys/fs/cgroup/net_cls/openvpn.example.com/net_cls.classid
+
