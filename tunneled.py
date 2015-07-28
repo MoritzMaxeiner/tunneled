@@ -142,6 +142,10 @@ def main():
 	if "SUDO_USER" in os.environ.keys():
 		drop_sudo_to_suid();
 
+	(ruid, euid, suid) = os.getresuid();
+	if not (euid == 0 and suid == 0):
+		raise RuntimeError('tunneled must be run as root');
+
 	try:
 		argument_split = sys.argv.index('--');
 		app_argv = sys.argv[argument_split + 1 :];
