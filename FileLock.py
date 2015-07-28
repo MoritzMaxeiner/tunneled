@@ -2,6 +2,8 @@
 
 import os, subprocess, time, sys;
 
+import butter.inotify as inotify;
+
 class FileLock:
 
 	def acquire(self, blocking=True, timeout=-1):
@@ -10,42 +12,49 @@ class FileLock:
 		timeout = int(timeout);
 		while True:
 			try:
-				self.atomicFile = open(self.fileName, 'x');
+				self.atomic_file = open(self.filename, 'x');
 				return True;
 			except FileExistsError:
 				if not blocking or timeout == 0:
-					self.atomicFile = None;
+					self.atomic_file = None;
 					return False;
-				timeBeforeWait = time.time();
-				subprocess.call(['inotifywait', '--event', 'delete_self', '--quiet', '--quiet', '--timeout', str(timeout), self.fileName]);
+				time_before_wait = time.time();
+				inotify = inotify.Inotify();
+				try:
+					wd = inotify.watch(self.filename, inotify.IN_DELETE_SELF);
+					inotify.wait(timeout=(timeout if timeout >= 0 else None));
+				except TimeoutError:
+					pass;
+				finally:
+					inotify.close();
 				if timeout > 0:
-					timeout = int(max(0, timeout - abs(time.time() - timeBeforeWait)));
+					timeout = int(max(0, timeout - abs(time.time() - time_before_wait)));
 
 	def release(self):
 		try:
-			if self.atomicFile:
-				self.atomicFile.close();
-			os.remove(self.fileName);
-			self.atomicFile = None;
+			if self.atomic_file:
+				self.atomic_file.close();
+			os.remove(self.filename);
+			self.atomic_file = None;
 		except OSError:
 			tb = sys.exc_info()[2];
-			raise RuntimeError('Could not release FileLock "' + self.fileName + '"').with_traceback(tb);
+			raise RuntimeError('Could not release FileLock "' + self.filename + '"').with_traceback(tb);
 
-	def __init__(self, fileName):
-		self.fileName = fileName;
-		self.atomicFile = None;
+	def __init__(self, filename):
+		self.filename = filename;
+		self.atomic_file = None;
 
 	def __del__(self):
 		try:
-			if self.atomicFile:
-				self.atomicFile.close();
-			os.remove(self.fileName);
-			self.atomicFile = None;
+			if self.atomic_file:
+				self.atomic_file.close();
+			os.remove(self.filename);
+			self.atomic_file = None;
 		except FileNotFoundError:
 			return;
 		except OSError:
 			tb = sys.exc_info()[2];
-			raise RuntimeError('Could not release FileLock "' + self.fileName + '"').with_traceback(tb);
+			raise RuntimeError('Could not release FileLock "' + self.filename + '"').with_traceback(tb);
 
 	def __enter__(self):
 		return self.acquire();
