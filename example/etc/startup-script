@@ -10,7 +10,12 @@ GID=dummy
 /sbin/ip rule add fwmark 100 table openvpn.example priority 100
 /sbin/ip rule add fwmark 100 table main unreachable priority 200
 
-# Control groups
-/usr/bin/cgcreate -t ${UID}:${GID} -a ${UID}:{$GID] -g net_cls:openvpn.example.com
-/bin/echo "100" > /sys/fs/cgroup/net_cls/openvpn.example.com/net_cls.classid
+# Control groups for Tunneled
+
+# Main control group with no vpn
+/usr/bin/cgcreate -t ${UID}:${GID} -a ${UID}:${GID} -g net_cls:tunneled
+
+# VPN control group
+/usr/bin/cgcreate -t ${UID}:${GID} -a ${UID}:${GID} -g net_cls:tunneled/openvpn.example.com
+/bin/echo "100" > /sys/fs/cgroup/net_cls/tunneled/openvpn.example.com/net_cls.classid
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.4
 
-import os, json, subprocess, enum, sys, pwd, time, argparse;
+import os, json, subprocess, enum, sys, pwd, time, argparse, signal;
 
 import FileLock;
 
@@ -19,31 +19,11 @@ def drop_sudo_to_suid():
 	if os.getresuid() != (pwdEntry.pw_uid, euid, euid):
 		sys.exit('Could not properly drop user id');
 
-# Drop from full root (precondition) down to what would be the permissions
-# if interpreter had been executed as uid:gid with "set user ID upon execution"
-# access rights flag set and had been owned by root.
-ConnectionState = enum.Enum('ConnectionState', 'Up Down')
-
-def _OpenRC_isState(vpn, state):
-	return subprocess.call(["/sbin/rc-service", vpn, "status"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == (0 if state == ConnectionState.Up else 3);
-
-def _OpenRC_changeState(vpn, newState, blocking = False):
-	if subprocess.call(['/sbin/rc-service', vpn, ('start' if newState == ConnectionState.Up else 'stop')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != (1 if newState == ConnectionState.Up else 0):
-		raise Exception('Could not change VPN status');
-	while blocking:
-		time.sleep(0.1);
-		if _OpenRC_isState(vpn, newState):
-			break;
-
-_OpenRC = {'isState' : _OpenRC_isState,
-           'changeState' : _OpenRC_changeState};
-
-VPNControllers = {'OpenRC': _OpenRC}
-
-class VPNConnection:
-	def __init__(self, name, controller = _OpenRC):
+class OpenVPNConnection:
+	def __init__(self, name, state='/tmp/.tunneled-state', lock='/tmp/.tunneled-lock'):
 		self.name = name;
-		self.controller = controller;
+		self.state = state;
+		self.lock = lock;
 
 	def __enter__(self):
 		self.acquire();
@@ -53,43 +33,47 @@ class VPNConnection:
 		self.release();
 		return True;
 
-	def acquire(self, blocking = True):
-		self.__acquireOrRelease(True, blocking, controller = self.controller);
+	def acquire(self):
+		self.__acquireOrRelease(True);
 
-	def release(self, blocking = True):
-		self.__acquireOrRelease(False, blocking, controller = self.controller);
+	def release(self):
+		self.__acquireOrRelease(False);
 
-	def __acquireOrRelease(self, acquire, blocking, controller):
-		with FileLock.FileLock('/tmp/.tunneled-lock'):
+	def __acquireOrRelease(self, acquire):
+		with FileLock.FileLock(self.lock):
 			(ruid, euid, suid) = os.getresuid();
 
 			try:
-				with open('/tmp/.tunneled-state', 'r') as stateFile:
-					state = json.load(stateFile);
+				with open(self.state, 'r') as state_file:
+					state = json.load(state_file);
 			except FileNotFoundError:
-				state = {self.name: {'useCount': 0}};
+				state = {self.name: {'pid': None, 'use_count': 0}};
 
-			# Drop effective user id to have the state file belong to real UID
-			os.setresuid(ruid, ruid, suid);
-
-			state[self.name]['useCount'] += (1 if acquire else -1);
-			with open('/tmp/.tunneled-state', 'w') as stateFile:
-				json.dump(state, stateFile);
-
-			# Restore effective user id
-			os.setresuid(ruid, euid, suid);
-
-			# Elevate real to effective user id
+			# Elevate real to stored effective user id
 			# Seems to be required for direct VPN actions
 			os.setresuid(euid, euid, suid);
 
-			# Start VPN if needed
-			if acquire and controller['isState'](self.name, ConnectionState.Down):
-				controller['changeState'](self.name, ConnectionState.Up, blocking);
-			elif not acquire and controller['isState'](self.name, ConnectionState.Up) and state[self.name]['useCount'] <= 0:
-				controller['changeState'](self.name, ConnectionState.Down, blocking);
+			# Start/Stop OpenVPN
+			if acquire and not state[self.name]['pid']:
+				openvpn_process = subprocess.Popen(['/usr/sbin/openvpn', os.environ['HOME'] + '/.tunneled/' + self.name.replace('.', '/', 1) + '.conf'],
+					stdout=subprocess.DEVNULL,
+					stderr=subprocess.DEVNULL,
+					start_new_session=True
+#					preexec_fn=os.setpgrp
+					);
+				state[self.name]['pid'] = openvpn_process.pid;
+			elif not acquire and state[self.name]['pid'] and state[self.name]['use_count'] == 1:
+				os.kill(state[self.name]['pid'], signal.SIGTERM);
+				state[self.name]['pid'] = None;
 
-			# Restore real, effective, and saved user id
+			# Drop real and effective to stored real user id
+			os.setresuid(ruid, ruid, suid);
+
+			state[self.name]['use_count'] += (1 if acquire else -1);
+			with open(self.state, 'w') as state_file:
+				json.dump(state, state_file);
+
+			# Restore real, effective, and saved user id to stored values
 			os.setresuid(ruid, euid, suid);
 
 			# Lose state before releasing lock
@@ -106,30 +90,29 @@ def main():
 	except ValueError:
 		app_argv = [];
 
-	parser = argparse.ArgumentParser(description = "Tunnel a program's network traffic over VPN", usage="%(prog)s [options] program vpn-controller vpn [-- [program options]]");
+	parser = argparse.ArgumentParser(description = "Tunnel a program's network traffic over VPN", usage="%(prog)s [options] program vpn [-- [program options]]");
 	parser.add_argument('program', help='program to tunnel');
-	parser.add_argument('vpn_controller', help="subsystem in control of VPN, e.g. 'OpenRC'");
 	parser.add_argument('vpn', help='vpn connection to tunnel over');
 
 	args = parser.parse_args();
 
-	with VPNConnection(args.vpn, controller = VPNControllers[args.vpn_controller]):
-		# Create child process to be turned into chromium
-		pid = os.fork();
+	# Create child process to be turned into designated programm
+	pid = os.fork();
 
-		if(pid != 0):
-			# Sleep until child-turned-chromium exits
+	if(pid != 0):
+		with OpenVPNConnection(args.vpn):
+			# Sleep until child exits
 			os.waitid(os.P_PID, pid, os.WEXITED);
-		else:
-			# Drop effective and saved to real user id
-			# (Permanently drop all privileges)
-			os.setuid(os.getuid());
+	else:
+		# Drop effective and saved to real user id
+		# (Permanently drop all privileges)
+		os.setuid(os.getuid());
 
-			# Force Application into VPN-only control group
-			with open('/sys/fs/cgroup/net_cls/' + args.vpn + '/tasks', 'w') as tasks:
-				tasks.write(str(os.getpid()));
+		# Force Application into VPN-only control group
+		with open('/sys/fs/cgroup/net_cls/tunneled/' + args.vpn + '/tasks', 'w') as tasks:
+			tasks.write(str(os.getpid()));
 
-			os.execvp(args.program, [args.program] + app_argv);
+		os.execvp(args.program, [args.program] + app_argv);
 
 if __name__ == '__main__':
 	main();
