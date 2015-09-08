@@ -100,11 +100,16 @@ class OpenVPNConnection:
 			# Start/Stop OpenVPN
 			if acquire and not state[self.name]['pid']:
 				openvpn_process = subprocess.Popen(['/usr/sbin/openvpn', os.environ['HOME'] + '/.tunneled/' + self.name.replace('.', '/', 1) + '.conf'],
-					stdout=subprocess.DEVNULL,
+					stdout=subprocess.PIPE,
 					stderr=subprocess.DEVNULL,
-					start_new_session=True
+					start_new_session=True,
+					universal_newlines=True
 #					preexec_fn=os.setpgrp
 					);
+				while True:
+					openvpn_stdout_line = openvpn_process.stdout.readline();
+					if 'Initialization Sequence Completed' in openvpn_stdout_line:
+						break;
 				state[self.name]['pid'] = openvpn_process.pid;
 			elif not acquire and state[self.name]['pid'] and state[self.name]['use_count'] == 1:
 				os.kill(state[self.name]['pid'], signal.SIGTERM);
@@ -159,23 +164,23 @@ def main():
 
 	args = parser.parse_args();
 
-	# Create child process to be turned into designated programm
-	pid = os.fork();
+	with OpenVPNConnection(args.vpn):
+		# Create child process to exec the designated program
+		pid = os.fork();
 
-	if(pid != 0):
-		with OpenVPNConnection(args.vpn):
+		if(pid != 0):
 			# Sleep until child exits
 			os.waitid(os.P_PID, pid, os.WEXITED);
-	else:
-		# Drop effective and saved to real user id
-		# (Permanently drop all privileges)
-		os.setuid(os.getuid());
+		else:
+			# Drop effective and saved to real user id
+			# (Permanently drop all privileges)
+			os.setuid(ruid);
 
-		# Force Application into VPN-only control group
-		with open('/sys/fs/cgroup/net_cls/tunneled/' + args.vpn + '/tasks', 'w') as tasks:
-			tasks.write(str(os.getpid()));
+			# Force Application into VPN-only control group
+			with open('/sys/fs/cgroup/net_cls/tunneled/' + args.vpn + '/tasks', 'w') as tasks:
+				tasks.write(str(os.getpid()));
 
-		os.execvp(args.program, [args.program] + app_argv);
+			os.execvp(args.program, [args.program] + app_argv);
 
 if __name__ == '__main__':
 	main();
