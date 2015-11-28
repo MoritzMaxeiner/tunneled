@@ -180,10 +180,17 @@ bool ovpn_acquire(OpenVPNConnection* connection)
 			close(openvpn_stdout_pipe[1]);
 			close(openvpn_stdout_pipe[0]);
 
-			char* openvpn_argv[3];
+			char** openvpn_argv = (char**) calloc(9, sizeof(char*));
+
 			openvpn_argv[0] = "/usr/sbin/openvpn";
-			asprintf(&openvpn_argv[1], "%s/.tunneled/%s.conf", getenv("HOME"), connection -> name);
-			openvpn_argv[2] = NULL;
+
+			openvpn_argv[1] = "--config";
+			asprintf(&openvpn_argv[2], "%s/.tunneled/%s.conf", getenv("HOME"), connection -> name);
+			openvpn_argv[3] = "--route-noexec";
+			openvpn_argv[4] = "--script-security";
+			openvpn_argv[5] = "2";
+			openvpn_argv[6] = "--route-up";
+			openvpn_argv[7] = "/etc/openvpn/tunneled-route-up.sh";
 
 			// Detach OpenVPN (child) process, so it survives this process' terminals' termination
 			setsid();
