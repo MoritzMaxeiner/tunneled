@@ -185,7 +185,7 @@ bool ovpn_acquire(OpenVPNConnection* connection)
 			openvpn_argv[0] = "/usr/sbin/openvpn";
 
 			openvpn_argv[1] = "--config";
-			asprintf(&openvpn_argv[2], "%s/.tunneled/%s.conf", getenv("HOME"), connection -> name);
+			asprintf(&openvpn_argv[2], "%s/.config/tunneled/%s.conf", getenv("HOME"), connection -> name);
 			openvpn_argv[3] = "--route-noexec";
 			openvpn_argv[4] = "--script-security";
 			openvpn_argv[5] = "2";
