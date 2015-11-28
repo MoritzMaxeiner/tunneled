@@ -22,6 +22,8 @@
 
 #include <pwd.h>
 
+#include <errno.h>
+
 typedef struct
 {
 	pid_t process;
@@ -143,9 +145,62 @@ bool ovpn_acquire(OpenVPNConnection* connection)
 
 	connection -> state -> use_count += 1;
 
-	printf("PID: %d, Use count: %d\n", connection -> state -> process, connection -> state -> use_count);
+	// Start the OpenVPN process, if it is not already running
+	if (connection -> state -> process == 0)
+	{
+		int openvpn_stdout_pipe[2];
+		if (pipe(openvpn_stdout_pipe) == -1)
+		{
+			perror("Could not create pipe to OpenVPN process");
+			return false;
+		}
 
-	// TODO: Implement starting of OpenVPN
+		pid_t pid = fork();
+		if (pid != 0)
+		{
+			connection -> state -> process = pid;
+
+			close(openvpn_stdout_pipe[1]);
+
+			ssize_t line_length;
+			char* line = NULL;
+			size_t n = 0;
+			FILE* openvpn_stdout = fdopen(openvpn_stdout_pipe[0], "r");
+
+			do line_length = getline(&line, &n, openvpn_stdout);
+			while (line_length != -1 && strstr(line, "Initialization Sequence Completed") == NULL);
+
+			if (line != NULL) free(line);
+
+			fclose(openvpn_stdout);
+		}
+		else
+		{
+			while ((dup2(openvpn_stdout_pipe[1], STDOUT_FILENO) == -1) && (errno == EINTR)) {}
+			close(openvpn_stdout_pipe[1]);
+			close(openvpn_stdout_pipe[0]);
+
+			char* openvpn_argv[3];
+			openvpn_argv[0] = "/usr/sbin/openvpn";
+			asprintf(&openvpn_argv[1], "%s/.tunneled/%s.conf", getenv("HOME"), connection -> name);
+			openvpn_argv[2] = NULL;
+
+			// Detach OpenVPN (child) process, so it survives this process' terminals' termination
+			setsid();
+
+			uid_t ruid, euid, suid;
+			getresuid(&ruid, &euid, &suid);
+
+			// Elevate real UID to effective UID
+			// This seems to be required to start OpenVPN
+			setresuid(euid, euid, suid);
+
+			// Execute OpenVPN by replacing the child process with it
+			execvp(openvpn_argv[0], openvpn_argv);
+			perror("Could not execute OpenVPN");
+			exit(1);
+		}
+	}
 
 	sem_post(connection -> lock);
 
@@ -158,9 +213,20 @@ bool ovpn_release(OpenVPNConnection* connection)
 
 	if (connection -> state -> use_count > 0) connection -> state -> use_count -= 1;
 
-	printf("PID: %d, Use count: %d\n", connection -> state -> process, connection -> state -> use_count);
+	uid_t ruid, euid, suid;
+	getresuid(&ruid, &euid, &suid);
 
-	// TODO: Implement stopping of OpenVPN
+	if (connection -> state -> use_count == 0)
+	{
+		// Elevate real UID to effective UID
+		// This seems to be required to start OpenVPN
+		setresuid(euid, euid, suid);
+
+		kill(connection -> state -> process, SIGTERM);
+
+		// Drop real UID to its previous value
+		setresuid(ruid, euid, suid);
+	}
 
 	sem_post(connection -> lock);
 
@@ -226,7 +292,6 @@ int main(int argc, char* argv[])
 
 	// Create child process to exec the designated program
 	pid_t pid = fork();
-
 	if(pid != 0)
 	{
 		// Sleep until child exits
@@ -252,7 +317,7 @@ int main(int argc, char* argv[])
 
 		free(task_file_name);
 
-		// Execute application
+		// Execute application by replacing the child process with it
 		execvp(program_argv[0], program_argv);
 	}
 
