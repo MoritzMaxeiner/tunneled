@@ -1,6 +1,8 @@
 
 #define SHARED_NAME "/org.ucworks.tunneled"
 
+#define _GNU_SOURCE
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -8,11 +10,15 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include <semaphore.h>
 #include <sys/mman.h>
 
 #include <stdio.h>
+#include <string.h>
+
+#include <sys/wait.h>
 
 typedef struct
 {
@@ -137,6 +143,8 @@ bool ovpn_acquire(OpenVPNConnection* connection)
 
 	printf("PID: %d, Use count: %d\n", connection -> state -> process, connection -> state -> use_count);
 
+	// TODO: Implement starting of OpenVPN
+
 	sem_post(connection -> lock);
 
 	return true;
@@ -150,20 +158,71 @@ bool ovpn_release(OpenVPNConnection* connection)
 
 	printf("PID: %d, Use count: %d\n", connection -> state -> process, connection -> state -> use_count);
 
+	// TODO: Implement stopping of OpenVPN
+
 	sem_post(connection -> lock);
 
 	return true;
 }
 
+void drop_sudo_to_suid()
+{
+	
+}
+
 int main(int argc, char* argv[])
 {
-	OpenVPNConnection* connection = ovpn_new("openvpn.us-east@hide.me");
+	if (getenv("SUDO_USER") != NULL) drop_sudo_to_suid();
 
-	ovpn_acquire(connection); usleep(2 * 1000 * 1000); ovpn_release(connection);
-	ovpn_acquire(connection); usleep(2 * 1000 * 1000); ovpn_release(connection);
-	ovpn_acquire(connection); usleep(2 * 1000 * 1000); ovpn_release(connection);
+	uid_t ruid, euid, suid;
+	getresuid(&ruid, &euid, &suid);
+	if (!(euid == 0 && suid == 0))
+	{
+		fprintf(stderr, "tunneled must be run as root\n");
+		return 1;
+	}
 
-	ovpn_free(&connection);
+	int program_argc = 1;
+	if (argc >= 4 && strcmp(argv[3], "--") == 0) program_argc += argc - 4;
+
+	char** program_argv = (char**) calloc(program_argc + 1, sizeof(char*));
+	program_argv[0] = argv[1];
+	if (program_argc > 1) memcpy(&program_argv[1], &argv[4], (program_argc - 1) * sizeof(char*));
+
+	OpenVPNConnection* connection = ovpn_new(argv[2]);
+	ovpn_acquire(connection);
+
+	// Create child process to exec the designated program
+	pid_t pid = fork();
+
+	if(pid != 0)
+	{
+		// Sleep until child exits
+		siginfo_t child_info;
+		waitid(P_PID, pid, &child_info, WEXITED);
+
+		ovpn_release(connection);
+		ovpn_free(&connection);
+	}
+	else
+	{
+		// Drop effective and saved to real user id
+		// (Permanently drop all privileged)
+		setuid(ruid);
+
+		// Force application into VPN-only control group
+		char* task_file_name;
+		asprintf(&task_file_name, "/sys/fs/cgroup/net_cls/tunneled/%s/tasks", argv[2]);
+
+		FILE* task_file = fopen(task_file_name, "a");
+		fprintf(task_file, "%d\n", getpid());
+		fclose(task_file);
+
+		free(task_file_name);
+
+		// Execute application
+		execvp(program_argv[0], program_argv);
+	}
 
 	return 0;
 }
