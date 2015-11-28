@@ -20,6 +20,8 @@
 
 #include <sys/wait.h>
 
+#include <pwd.h>
+
 typedef struct
 {
 	pid_t process;
@@ -165,14 +167,44 @@ bool ovpn_release(OpenVPNConnection* connection)
 	return true;
 }
 
-void drop_sudo_to_suid()
+bool drop_sudo_to_suid()
 {
-	
+	// Lookup the password database entry of the user executing 'sudo'
+	struct passwd* pwd_entry = getpwnam(getenv("SUDO_USER"));
+
+	// Drop real GID, effective GID, and saved GID to that user's GID
+	setresgid(pwd_entry -> pw_gid, pwd_entry -> pw_gid, pwd_entry -> pw_gid);
+	// Panic if any of them were not set as expected
+	gid_t rgid, egid, sgid;
+	getresgid(&rgid, &egid, &sgid);
+	if (rgid != pwd_entry -> pw_gid ||
+		egid != pwd_entry -> pw_gid ||
+		sgid != pwd_entry -> pw_gid)
+	{
+		fprintf(stderr, "Could not properly drop group id\n");
+		return false;
+	}
+
+	// Drop real UID, keep effective UID, and set saved UID to effective UID
+	uid_t ruid, euid, suid, saved_euid;
+	getresuid(&ruid, &saved_euid, &suid);
+	setresuid(pwd_entry -> pw_uid, saved_euid, saved_euid);
+	// Panic if any of them were not set as expected
+	getresuid(&ruid, &euid, &suid);
+	if (ruid != pwd_entry -> pw_uid ||
+		euid != saved_euid ||
+		suid != saved_euid)
+	{
+		fprintf(stderr, "Could not properly drop user id\n");
+		return false;
+	}
+
+	return true;
 }
 
 int main(int argc, char* argv[])
 {
-	if (getenv("SUDO_USER") != NULL) drop_sudo_to_suid();
+	if (getenv("SUDO_USER") != NULL) if (!drop_sudo_to_suid()) return 1;
 
 	uid_t ruid, euid, suid;
 	getresuid(&ruid, &euid, &suid);
