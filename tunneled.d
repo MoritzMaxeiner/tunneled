@@ -16,15 +16,10 @@ void main(string[] args)
 
     enforce(args.length >= 3);
 
-    int argc = 1;
-    if (args.length >= 4 && args[3] == "--") {
-        argc += args.length - 4;
-    }
-
-    char** argv = cast(char**) calloc(argc + 1, (char*).sizeof);
-    argv[0] = cast(char*) args[1].toStringz;
-    if (argc > 1) for (auto i = 4; i <= args.length; i++) {
-        argv[i] = cast(char*) args[i].toStringz;
+    string[] programArgs;
+    programArgs ~= args[1];
+    if (args.length >= 4) {
+        programArgs ~= args[4..$];
     }
 
     auto connection = new OpenVPNConnection(args[2]);
@@ -46,7 +41,7 @@ void main(string[] args)
             taskFile.writeln(getpid());
         }
 
-        execvp(argv[0], argv);
+        execvp(programArgs[0], programArgs);
     }
 }
 
@@ -55,7 +50,7 @@ void dropSudoToSuid()
     int failed;
     auto pwdEntry = getpwnam(getenv("SUDO_USER"));
 
-	failed = setresgid(pwdEntry.pw_gid, pwdEntry.pw_gid, pwdEntry.pw_gid);
+    failed = setresgid(pwdEntry.pw_gid, pwdEntry.pw_gid, pwdEntry.pw_gid);
     errnoEnforce(!failed, "Failed to drop group privileges");
 
     uid_t ruid, euid, suid;
@@ -152,16 +147,15 @@ public:
                     errnoEnforce(fd != -1, "Failed to redirect child stdout to pipe");
                 }
 
-                char** argv = cast(char**) calloc(9, (char*).sizeof);
-
-                argv[0] = cast(char*) "/usr/sbin/openvpn".toStringz;
-                argv[1] = cast(char*) "--config".toStringz;
-                asprintf(&argv[2], "%s/.config/tunneled/%s.conf", getenv("HOME"), name.toStringz);
-                argv[3] = cast(char*) "--route-noexec".toStringz;
-                argv[4] = cast(char*) "--script-security".toStringz;
-                argv[5] = cast(char*) "2".toStringz;
-                argv[6] = cast(char*) "--route-up".toStringz;
-                argv[7] = cast(char*) "/etc/openvpn/tunneled-route-up.sh".toStringz;
+                auto args = [
+                    "/usr/sbin/openvpn",
+                    "--config",
+                    "%s/.config/tunneled/%s.conf".format(getenv("HOME").fromStringz, name),
+                    "--route-noexec",
+                    "--script-security", "2",
+                    "--route-up",
+                    "/etc/openvpn/tunneled-route-up.sh"
+                ];
 
                 setsid(); // Detach child process
 
@@ -173,7 +167,7 @@ public:
                 failed = setresuid(euid, euid, suid);
                 errnoEnforce(!failed, "Failed to elevate privileges");
 
-                execvp(argv[0], argv);
+                execvp(args[0], args);
                 errnoEnforce(false, "Failed to spawn OpenVPN");
             }
         } else {
@@ -247,11 +241,12 @@ import core.sys.posix.stdlib : calloc, getenv;
 import core.sys.posix.pwd : getpwnam;
 
 import std.conv : octal;
-import std.string : toStringz;
+import std.string : toStringz, fromStringz;
 import std.format : format;
 import std.exception : enforce, errnoEnforce;
 import std.stdio : File, stderr;
 import std.algorithm : canFind;
+import std.process : execvp;
 
 
 __gshared extern (C):
