@@ -1,5 +1,5 @@
 #!/bin/sh
 
-gcc -std=c11 tunneled.c -o tunneled -lpthread -lrt
+dmd tunneled.d
 sudo chown root tunneled
 sudo chmod u+s tunneled
