@@ -1,5 +1,5 @@
 #!/bin/sh
 
-dmd tunneled.d
+dub build --build=release
 sudo chown root tunneled
 sudo chmod u+s tunneled

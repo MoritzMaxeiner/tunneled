@@ -1,5 +1,10 @@
 module tunneled;
 
+struct Settings
+{
+
+}
+
 void main(string[] args)
 {
     int failed;
