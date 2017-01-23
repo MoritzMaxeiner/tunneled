@@ -1,4 +1,4 @@
-#!/bin/sh
+#! /bin/sh
 
 dub build --build=release
 sudo chown root tunneled
