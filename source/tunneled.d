@@ -56,14 +56,14 @@ void main(string[] args)
         scope(exit) destroy(connection);
         connection.release();
     } else {
-        failed = setresuid(ruid, ruid, ruid);
-        enforce(!failed, "Failed to drop user privileges");
-
         {
-            auto taskFile = File("/sys/fs/cgroup/net_cls/tunneled/%s/tasks".format(settings.name), "a");
+            auto taskFile = File("/sys/fs/cgroup/net_cls/tunneled_%s/tasks".format(settings.name), "a");
             taskFile.writeln(getpid());
             // std.process.thisProcessID
         }
+
+        failed = setresuid(ruid, ruid, ruid);
+        enforce(!failed, "Failed to drop user privileges");
 
         execvp(args[2], args[2..$]);
     }
@@ -317,6 +317,14 @@ void togglePacketFiltering(Settings settings, bool enable)
         "/sbin/iptables", "-t", "mangle", enable? "-A": "-D", "OUTPUT",
         "-m", "cgroup", "--cgroup", settings.routing.classid.to!string,
         "-j", "MARK", "--set-mark", settings.routing.mark.to!string
+    ).spawnShell.wait;
+    enforce(!failed, "Failed to toggle IPv4 packet filter rule");
+
+    failed = escapeShellCommand(
+        "/sbin/iptables", "-t", "mangle", enable? "-A": "-D", "OUTPUT",
+        "-m", "mark", "--mark", settings.routing.mark.to!string,
+        "-p", "udp", "--dport", "53",
+        "-j", "MARK", "--set-mark", "0/" ~ settings.routing.mark.to!string
     ).spawnShell.wait;
     enforce(!failed, "Failed to toggle IPv4 packet filter rule");
 
