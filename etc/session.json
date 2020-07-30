@@ -1,0 +1,17 @@
+{
+    "name": "example",
+    "client": {
+        "type": "OpenVPN",
+        "args": [
+            "--config", "/path/to/openvpn-config-file",
+            "--auth-nocache",
+            "--auth-user-pass", "/path/to/secret"
+        ]
+    },
+    "routing": {
+        "table": 100,
+        "mark": 100,
+        "classid": 100,
+        "nameserver": "127.0.0.1"
+    }
+}
