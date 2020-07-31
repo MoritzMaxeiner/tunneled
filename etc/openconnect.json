@@ -1,0 +1,17 @@
+{
+    "name": "openconnect",
+    "client": {
+        "type": "OpenConnect",
+        "args": [
+            "--user=USER",
+            "vpn.example.com"
+        ],
+        "password": "PASSWORD"
+    },
+    "routing": {
+        "table": 101,
+        "mark": 101,
+        "classid": 101,
+        "nameserver": "127.0.0.1"
+    }
+}

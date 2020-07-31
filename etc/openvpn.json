@@ -1,5 +1,5 @@
 {
-    "name": "example",
+    "name": "openvpn",
     "client": {
         "type": "OpenVPN",
         "args": [
