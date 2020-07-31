@@ -157,6 +157,80 @@ protected:
     }
 }
 
+class OpenConnect : Client
+{
+    string script;
+
+    this(net.Routing routing, string[] args, string password)
+    {
+        if (!exists(runtimeDir)) {
+            mkdir(runtimeDir);
+        }
+
+        script = "%s/openconnect-script.sh".format(runtimeDir);
+
+        {
+            auto f = File(script, "w");
+            f.write(`#! /bin/sh
+case "${reason}" in
+pre-init)
+    ;;
+connect)
+    /bin/ip route flush table $1
+    /bin/ip link set dev "${TUNDEV}" up
+    /bin/ip addr add "${INTERNAL_IP4_ADDRESS}/32" peer "${INTERNAL_IP4_ADDRESS}" dev "${TUNDEV}"
+    /bin/ip route add default dev "${TUNDEV}" table $1
+    /bin/ip route add "${INTERNAL_IP4_NETADDR}/${INTERNAL_IP4_NETMASKLEN}" dev "${TUNDEV}" table $1
+    /usr/sbin/sysctl net.ipv4.conf."${TUNDEV}".rp_filter=2
+    ;;
+disconnect)
+    /bin/ip route flush table $1
+    ;;
+attempt-reconnect)
+    ;;
+reconnect)
+    ;;
+*)
+    echo "unknown reason '$reason'. Maybe openconnect-script is out of date" 1>&2
+    exit 1
+    ;;
+esac
+    `);
+            fchmod(f.fileno, octal!700);
+        }
+
+        super(routing, args);
+
+        stdin.write(password);
+        stdin.close();
+    }
+
+    override void wait()
+    {
+        foreach (line; stdout.byLine)
+        {
+            import std.stdio : stderr;
+            stderr.writeln(line);
+            if (line.canFind("Established"))
+                return;
+        }
+    }
+
+protected:
+
+    override void exec()
+    {
+        args = [ "/usr/sbin/openconnect" ]
+             ~ [ "--passwd-on-stdin",
+                 "--script", script ~ " " ~ routing.table.to!string]
+             ~ args;
+        import std.stdio;
+        stderr.writeln(args);
+        execvp(args[0], args);
+        errnoEnforce(false);
+    }
+}
+
 import std.process : execvp;
 import core.sys.posix.sys.stat : fchmod;
 
