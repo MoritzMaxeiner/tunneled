@@ -14,6 +14,7 @@ SRCS := \
 	src/tunneled/util.d \
 	src/tunneled/capability.d \
 	src/tunneled/cgroup.d \
+	src/tunneled/nftables.d \
 	src/tunneled/net.d
 DFLAGS := $(DFLAGS) -I src
 
@@ -30,7 +31,8 @@ DFLAGS := $(DFLAGS) -I vendor/asdf/source
 
 LIBS := \
 	rt \
-	cap
+	cap \
+	nftables
 
 
 MKDIR ?= mkdir -p
