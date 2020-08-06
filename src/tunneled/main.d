@@ -32,16 +32,12 @@ public:
         this.settings = settings;
         asprintf(&sharedName, "%s.%s", "/org.ucworks.tunneled".toStringz, settings.name.toStringz);
 
-        sem_unlink(sharedName);
-
         sem = sem_open(sharedName, O_CREAT, octal!644, 1);
         errnoEnforce(sem != SEM_FAILED, "Failed to open named semaphore");
         scope(failure) sem_close(sem);
 
         sem_wait(sem);
         scope(exit) sem_post(sem);
-
-        shm_unlink(sharedName);
 
         auto sharedState = shm_open(sharedName, O_CREAT | O_RDWR, octal!644);
         errnoEnforce(sharedState != -1, "Failed to open shared memory");

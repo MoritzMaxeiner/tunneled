@@ -136,8 +136,6 @@ class OpenVPN : Client
     {
         foreach (line; stdout.byLine)
         {
-            import std.stdio : stderr;
-            stderr.writeln(line);
             if (line.canFind("Initialization Sequence Completed"))
                 return;
         }
@@ -209,8 +207,6 @@ esac
     {
         foreach (line; stdout.byLine)
         {
-            import std.stdio : stderr;
-            stderr.writeln(line);
             if (line.canFind("Established"))
                 return;
         }
