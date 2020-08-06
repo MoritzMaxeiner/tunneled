@@ -10,7 +10,6 @@ The following programs are called by tunneled to make changes to the system, but
 
 - `sysctl`: `CAP_NET_ADMIN`
 - `ip`: `CAP_NET_ADMIN`
-- `nft`: `CAP_NET_ADMIN`
 - `cgcreate`: `CAP_DAC_OVERRIDE`
 - `cgdelete`: `CAP_DAC_OVERRIDE`
 
@@ -26,7 +25,6 @@ Since it is likely your Linux distribution does not do the above by default, you
 ```
 # setcap cap_net_admin+ei $(which sysctl)
 # setcap cap_net_admin+ei $(which ip)
-# setcap cap_net_admin+ei $(which nft)
 
 # setcap cap_dac_override+ei $(which cgcreate)
 # setcap cap_dac_override+ei $(which cgdelete)
